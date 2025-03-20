@@ -5,6 +5,7 @@ sak32=1234567890123456789012345678901212345678901234567890123456789012
 salt=838383838383838383838383
 
 rm -rf /sys/fs/bpf/xdp/dispatch* 
+rm -rf /sys/fs/bpf/{e12,e21,e23,e32}
 #ip netns exec ns1 ./cpass/xdp_pass_user  --dev e12 --unload-all 2>/dev/null
 #ip netns exec ns2 ./cpass/xdp_pass_user  --dev e21 --unload-all 2>/dev/null
 #ip netns exec ns2 ./cpass/xdp_pass_user  --dev e23 --unload-all 2>/dev/null
@@ -109,23 +110,26 @@ if [ "x$2" == "xaf" ]; then
 #    ip netns exec ns2 ./direct_pass/xpass -if e23  &
 #    ip netns exec ns2 ./af_go/afgo -from e23 -to e21  &
 else
-    (cd cpass; ip netns exec ns2 ./xdp_pass_user --dev e21)  &
-    (cd cpass; ip netns exec ns2 ./xdp_pass_user --dev e23)  &
+    (cd cfwd; ip netns exec ns2 ./xdp-loader load -p /etc/bpf/e21 -n xdp_fwd_direct_prog e21 xdp_prog_kern.o)
+    (cd cfwd; ip netns exec ns2 ./xdp_prog_user -d e21 -r e23)
+    (cd cfwd; ip netns exec ns2 ./xdp-loader load -p /etc/bpf/e23 -n xdp_fwd_direct_prog e23 xdp_prog_kern.o)
+    (cd cfwd; ip netns exec ns2 ./xdp_prog_user -d e23 -r e21)
 fi
 
     ip netns exec ns1 bash -c "echo 0 >  /proc/sys/net/ipv4/conf/e12/rp_filter"
 
 # for test from ns3 to ns1
-#    ip netns exec ns1 ip route add 13.0.0.0/24 dev e12
+    ip netns exec ns1 ip route add 13.0.0.0/24 dev e12
     ip netns exec ns3 bash -c "echo 0 >  /proc/sys/net/ipv4/conf/e32/rp_filter"
 
     ip netns exec ns1 ethtool -K e12 tx off
     ip netns exec ns3 ethtool -K e32 tx off
-#    ip netns exec ns3 ip route add 12.0.0.0/24 dev e32
+    ip netns exec ns3 ip route add 12.0.0.0/24 dev e32
     (cd cpass; ip netns exec ns3 ./xdp_pass_user --dev e32)  &
 
-    ip netns exec ns1 ip route add 13.0.0.0/24 via 12.0.0.21 dev e12
-    ip netns exec ns3 ip route add 12.0.0.0/24 via 13.0.0.23 dev e32
+    # below just test with cpass in ns2, not work with anyother situation
+#    ip netns exec ns1 ip route add 13.0.0.0/24 via 12.0.0.21 dev e12
+#    ip netns exec ns3 ip route add 12.0.0.0/24 via 13.0.0.23 dev e32
 # for test from ns4 to ns1
 #if [ "x$2" == "xaf" ]; then
 #    ip netns exec ns3 ./af_go/afgo -inlink e32 -outlink e34 -inlinkqueue 0 -outlinkqueue 0  &

@@ -50,60 +50,11 @@ static const struct option_wrapper long_options[] = {
 	{{0, 0, NULL,  0 }, NULL, false}
 };
 
-static int parse_u8(char *str, unsigned char *x)
-{
-	unsigned long z;
-
-	z = strtoul(str, 0, 16);
-	if (z > 0xff)
-		return -1;
-
-	if (x)
-		*x = z;
-
-	return 0;
-}
-
-static int parse_mac(char *str, unsigned char mac[ETH_ALEN])
-{
-	if (parse_u8(str, &mac[0]) < 0)
-		return -1;
-	if (parse_u8(str + 3, &mac[1]) < 0)
-		return -1;
-	if (parse_u8(str + 6, &mac[2]) < 0)
-		return -1;
-	if (parse_u8(str + 9, &mac[3]) < 0)
-		return -1;
-	if (parse_u8(str + 12, &mac[4]) < 0)
-		return -1;
-	if (parse_u8(str + 15, &mac[5]) < 0)
-		return -1;
-
-	return 0;
-}
-
-static int write_iface_params(int map_fd, unsigned char *src, unsigned char *dest)
-{
-	if (bpf_map_update_elem(map_fd, src, dest, 0) < 0) {
-		fprintf(stderr,
-			"WARN: Failed to update bpf map file: err(%d):%s\n",
-			errno, strerror(errno));
-		return -1;
-	}
-
-	printf("forward: %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x\n",
-			src[0], src[1], src[2], src[3], src[4], src[5],
-			dest[0], dest[1], dest[2], dest[3], dest[4], dest[5]
-	      );
-
-	return 0;
-}
-
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
-const char *pin_basedir =  "/sys/fs/bpf";
+const char *pin_basedir =  "/etc/bpf";
 
 int main(int argc, char **argv)
 {
@@ -112,8 +63,6 @@ int main(int argc, char **argv)
 	int map_fd;
 	bool redirect_map;
 	char pin_dir[PATH_MAX];
-	unsigned char src[ETH_ALEN];
-	unsigned char dest[ETH_ALEN];
 
 	struct config cfg = {
 		.ifindex   = -1,
@@ -137,18 +86,8 @@ int main(int argc, char **argv)
 		return EXIT_FAIL_OPTION;
 	}
 
-	if (parse_mac(cfg.src_mac, src) < 0) {
-		fprintf(stderr, "ERR: can't parse mac address %s\n", cfg.src_mac);
-		return EXIT_FAIL_OPTION;
-	}
-
-	if (parse_mac(cfg.dest_mac, dest) < 0) {
-		fprintf(stderr, "ERR: can't parse mac address %s\n", cfg.dest_mac);
-		return EXIT_FAIL_OPTION;
-	}
-
 	/* Open the tx_port map corresponding to the cfg.ifname interface */
-	map_fd = open_bpf_map_file(pin_dir, "tx_port", NULL);
+	map_fd = open_bpf_map_file(pin_dir, "xdp_tx_ports", NULL);
 	if (map_fd < 0) {
 		return EXIT_FAIL_BPF;
 	}
@@ -157,21 +96,9 @@ int main(int argc, char **argv)
 
 	if (redirect_map) {
 		/* setup a virtual port for the static redirect */
-		i = 0;
+		i = cfg.ifindex;
 		bpf_map_update_elem(map_fd, &i, &cfg.redirect_ifindex, 0);
 		printf("redirect from ifnum=%d to ifnum=%d\n", cfg.ifindex, cfg.redirect_ifindex);
-
-		/* Open the redirect_params map */
-		map_fd = open_bpf_map_file(pin_dir, "redirect_params", NULL);
-		if (map_fd < 0) {
-			return EXIT_FAIL_BPF;
-		}
-
-		/* Setup the mapping containing MAC addresses */
-		if (write_iface_params(map_fd, src, dest) < 0) {
-			fprintf(stderr, "can't write iface params\n");
-			return 1;
-		}
 	}
 
 	return EXIT_OK;
